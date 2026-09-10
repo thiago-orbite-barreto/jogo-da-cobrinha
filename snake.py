@@ -161,6 +161,7 @@ class SnakeApp:
 
     def show_menu(self) -> None:
         self.clear()
+        self.audio.play_loop()
         self.menu_canvas = tk.Canvas(
             self.root, bg="#090d1c", highlightthickness=0,
             width=620, height=520,
@@ -271,6 +272,7 @@ class SnakeApp:
         )
 
     def start_game(self) -> None:
+        self.audio.stop()
         self.clear()
         self.canvas = tk.Canvas(
             self.root,
