@@ -19,6 +19,8 @@ TICK_MS = 120
 SCORE_FILE = Path(__file__).with_name("highscore.json")
 SETTINGS_FILE = Path(__file__).with_name("settings.json")
 MENU_MUSIC_FILE = Path(__file__).with_name("menu_theme.mp3")
+SELECT_SOUND_FILE = Path(__file__).with_name("menu_select.mp3")
+GAME_MUSIC_FILE = Path(__file__).with_name("game_theme.mp3")
 Point = tuple[int, int]
 
 NAVY = (9, 13, 28)
@@ -108,6 +110,12 @@ class SnakeGame:
         self.menu_index = 0
         self.running = True
         self.music_playing = False
+        self.select_sound: Optional[pygame.mixer.Sound] = None
+        if pygame.mixer.get_init() and SELECT_SOUND_FILE.exists():
+            try:
+                self.select_sound = pygame.mixer.Sound(str(SELECT_SOUND_FILE))
+            except pygame.error:
+                self.select_sound = None
         self.start_menu_music()
 
     def window_size(self) -> tuple[int, int]:
@@ -128,6 +136,23 @@ class SnakeGame:
         if self.music_playing:
             pygame.mixer.music.stop()
             self.music_playing = False
+
+    def play_selection_sound(self) -> None:
+        if self.select_sound is not None:
+            self.select_sound.play()
+
+    def start_game_music(self) -> None:
+        if pygame.mixer.get_init() and GAME_MUSIC_FILE.exists():
+            try:
+                pygame.mixer.music.load(str(GAME_MUSIC_FILE))
+                pygame.mixer.music.play(-1)
+            except pygame.error:
+                pass
+
+    def stop_music(self) -> None:
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+        self.music_playing = False
 
     def draw_text(self, text: str, position: tuple[int, int], font: pygame.font.Font, color: tuple[int, int, int] = TEXT, center: bool = True) -> None:
         surface = font.render(text, True, color)
@@ -170,7 +195,7 @@ class SnakeGame:
         for index, record in enumerate(ranked[:10]):
             y = 170 + index * 30
             self.draw_text(f"{record.score}", (self.screen.get_width() // 2 - 160, y), self.font, GOLD)
-            self.draw_text(record.name[:20], (self.screen.get_width() // 2 - 35, y), self.small_font)
+            self.draw_text(record.name, (self.screen.get_width() // 2 - 35, y), self.small_font)
             self.draw_text(record.played_at, (self.screen.get_width() // 2 + 150, y), self.small_font, MUTED)
         if not ranked:
             self.draw_text("Nenhuma partida registrada.", (self.screen.get_width() // 2, 220), self.font, MUTED)
@@ -186,6 +211,7 @@ class SnakeGame:
 
     def new_game(self) -> None:
         self.stop_menu_music()
+        self.start_game_music()
         center = (self.settings.width // 2, self.settings.height // 2)
         self.snake = [center, (center[0] - 1, center[1])]
         self.food = self.random_food()
@@ -232,7 +258,7 @@ class SnakeGame:
         self.state = "name"
         self.name_input = ""
         self.previous_best = previous
-        self.stop_menu_music()
+        self.stop_music()
         pygame.key.stop_text_input()
         pygame.key.start_text_input()
 
@@ -260,17 +286,22 @@ class SnakeGame:
         if self.state == "menu":
             if key in (pygame.K_UP, pygame.K_w):
                 self.menu_index = (self.menu_index - 1) % 4
+                self.play_selection_sound()
             elif key in (pygame.K_DOWN, pygame.K_s):
                 self.menu_index = (self.menu_index + 1) % 4
+                self.play_selection_sound()
             elif key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.play_selection_sound()
                 (self.new_game, lambda: self.set_state("records"), lambda: self.set_state("options"), self.close)[self.menu_index]()
             elif key == pygame.K_ESCAPE:
                 self.close()
         elif self.state in ("records", "options"):
             if self.state == "options" and key in (pygame.K_UP, pygame.K_w):
                 self.menu_index = (self.menu_index - 1) % 3
+                self.play_selection_sound()
             elif self.state == "options" and key in (pygame.K_DOWN, pygame.K_s):
                 self.menu_index = (self.menu_index + 1) % 3
+                self.play_selection_sound()
             elif key in (pygame.K_ESCAPE, pygame.K_RETURN) and self.state == "records":
                 self.show_menu()
             elif key == pygame.K_ESCAPE:
