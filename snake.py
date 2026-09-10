@@ -162,13 +162,20 @@ class SnakeGame:
         outline = (30, 38, 48)
         glove = (238, 238, 214)
         shadow = (174, 181, 177)
-        pygame.draw.ellipse(self.screen, outline, (x - 16, y - 12, x + 14, y + 14))
-        pygame.draw.ellipse(self.screen, glove, (x - 13, y - 9, x + 11, y + 11))
-        pygame.draw.rect(self.screen, glove, (x - 9, y - 23, x - 2, y + 1), border_radius=3)
-        pygame.draw.rect(self.screen, glove, (x - 1, y - 27, x + 6, y + 1), border_radius=3)
-        pygame.draw.rect(self.screen, glove, (x + 7, y - 20, x + 14, y + 2), border_radius=3)
-        pygame.draw.polygon(self.screen, glove, ((x - 13, y - 2), (x - 27, y - 13), (x - 30, y - 8), (x - 12, y + 8)))
-        pygame.draw.line(self.screen, shadow, (x - 10, y + 8), (x + 8, y + 8), 2)
+        # Silhueta de uma mao apontando para a opcao selecionada.
+        hand = (
+            (x - 27, y - 4), (x - 16, y - 12), (x - 16, y - 25),
+            (x - 11, y - 28), (x - 7, y - 25), (x - 7, y - 13),
+            (x - 3, y - 13), (x - 3, y - 31), (x + 2, y - 34),
+            (x + 7, y - 31), (x + 7, y - 13), (x + 11, y - 13),
+            (x + 11, y - 26), (x + 16, y - 28), (x + 21, y - 24),
+            (x + 21, y - 5), (x + 14, y + 8), (x + 1, y + 14),
+            (x - 14, y + 11),
+        )
+        pygame.draw.polygon(self.screen, outline, hand)
+        inner_hand = tuple((point[0], point[1] + 2) for point in hand)
+        pygame.draw.polygon(self.screen, glove, inner_hand)
+        pygame.draw.line(self.screen, shadow, (x - 10, y + 7), (x + 10, y + 7), 2)
 
     def draw_records(self) -> None:
         self.draw_header("Records")
