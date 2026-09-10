@@ -1,267 +1,286 @@
-"""
-Jogo da Cobrinha no terminal
-============================
-
-Uma implementação pequena e didática de Snake usando apenas a biblioteca
- padrão do Python. O programa foi organizado em partes independentes para que
- a interface de terminal possa ser trocada futuramente por uma UI gráfica.
-
-Controles:
-    W/A/S/D ou setas  - mover
-    Q                - sair
-
-O recorde fica salvo em "highscore.json", ao lado deste arquivo.
-"""
+"""Jogo da cobrinha com interface gráfica Tkinter."""
 
 from __future__ import annotations
 
 import json
-import os
 import random
-import select
-import sys
-import time
+import tkinter as tk
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from tkinter import messagebox, simpledialog, ttk
 from typing import Optional
 
-
-WIDTH = 30
-HEIGHT = 15
-TICK_SECONDS = 0.12
+DEFAULT_WIDTH = 30
+DEFAULT_HEIGHT = 15
+TICK_MS = 120
 SCORE_FILE = Path(__file__).with_name("highscore.json")
-
+SETTINGS_FILE = Path(__file__).with_name("settings.json")
 Point = tuple[int, int]
 
 
 @dataclass
-class HighScore:
-    """Representa o melhor resultado conhecido."""
+class Record:
+    name: str
+    score: int
+    played_at: str
 
-    name: str = "Ninguém"
-    score: int = 0
+
+@dataclass
+class Settings:
+    width: int = DEFAULT_WIDTH
+    height: int = DEFAULT_HEIGHT
+    fullscreen: bool = False
+    theme: str = "Clássico"
 
 
-def load_high_score() -> HighScore:
-    """Lê o recorde do JSON; se ele ainda não existir, começa do zero."""
-
+def load_records() -> list[Record]:
     try:
-        with SCORE_FILE.open("r", encoding="utf-8") as file:
-            data = json.load(file)
-        return HighScore(str(data["name"]), int(data["score"]))
-    except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-        # Um arquivo ausente ou inválido não impede o jogo de funcionar.
-        return HighScore()
+        data = json.loads(SCORE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    if isinstance(data, dict) and "name" in data and "score" in data:
+        data = [{"name": data["name"], "score": data["score"], "played_at": "Data não registrada"}]
+    if not isinstance(data, list):
+        return []
+    records = []
+    for item in data:
+        if isinstance(item, dict) and "name" in item and "score" in item:
+            try:
+                records.append(Record(str(item["name"]), int(item["score"]), str(item.get("played_at", ""))))
+            except (TypeError, ValueError):
+                continue
+    return records
 
 
-def save_high_score(high_score: HighScore) -> None:
-    """Salva o recorde em formato legível para facilitar estudos."""
+def save_records(records: list[Record]) -> None:
+    SCORE_FILE.write_text(
+        json.dumps([record.__dict__ for record in records], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-    with SCORE_FILE.open("w", encoding="utf-8") as file:
-        json.dump(
-            {"name": high_score.name, "score": high_score.score},
-            file,
-            ensure_ascii=False,
-            indent=2,
+
+def load_settings() -> Settings:
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        settings = Settings(
+            int(data.get("width", DEFAULT_WIDTH)),
+            int(data.get("height", DEFAULT_HEIGHT)),
+            bool(data.get("fullscreen", False)),
+            str(data.get("theme", "Clássico")),
+        )
+        if (settings.width, settings.height) not in {(20, 10), (30, 15), (40, 20)}:
+            return Settings(theme=settings.theme, fullscreen=settings.fullscreen)
+        return settings
+    except (FileNotFoundError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        return Settings()
+
+
+def save_settings(settings: Settings) -> None:
+    SETTINGS_FILE.write_text(json.dumps(settings.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def best_record(records: list[Record]) -> Record:
+    return max(records, key=lambda record: record.score, default=Record("Ninguém", 0, ""))
+
+
+class SnakeApp:
+    """Janela principal, menus e partida do jogo."""
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.records = load_records()
+        self.settings = load_settings()
+        self.cell_size = 24
+        self.snake: list[Point] = []
+        self.food: Optional[Point] = None
+        self.direction: Point = (1, 0)
+        self.next_direction: Point = self.direction
+        self.score = 0
+        self.game_running = False
+        self.game_started = False
+        self.game_after_id: Optional[str] = None
+        self.root.title("Jogo da Cobrinha")
+        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+        self.root.bind("<KeyPress>", self.on_key)
+        self.apply_window_settings()
+        self.show_menu()
+
+    def apply_window_settings(self) -> None:
+        self.root.attributes("-fullscreen", self.settings.fullscreen)
+        if not self.settings.fullscreen:
+            self.root.geometry(f"{self.settings.width * self.cell_size + 40}x{self.settings.height * self.cell_size + 150}")
+
+    def clear(self) -> None:
+        for child in self.root.winfo_children():
+            child.destroy()
+
+    def show_menu(self) -> None:
+        self.clear()
+        frame = ttk.Frame(self.root, padding=35)
+        frame.pack(expand=True)
+        ttk.Label(frame, text="JOGO DA COBRINHA", font=("Arial", 24, "bold")).pack(pady=(0, 20))
+        ttk.Button(frame, text="Iniciar jogo", command=self.start_game).pack(fill="x", pady=5)
+        ttk.Button(frame, text="Records", command=self.show_records).pack(fill="x", pady=5)
+        ttk.Button(frame, text="Opções", command=self.show_options).pack(fill="x", pady=5)
+        ttk.Button(frame, text="Sair", command=self.root.destroy).pack(fill="x", pady=5)
+        record = best_record(self.records)
+        ttk.Label(frame, text=f"Melhor resultado: {record.score} pontos ({record.name})").pack(pady=(20, 0))
+
+    def show_records(self) -> None:
+        self.clear()
+        frame = ttk.Frame(self.root, padding=25)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="RECORDS", font=("Arial", 20, "bold")).pack(pady=(0, 15))
+        tree = ttk.Treeview(frame, columns=("score", "name", "date"), show="headings", height=12)
+        for column, title in (("score", "Pontos"), ("name", "Jogador"), ("date", "Data")):
+            tree.heading(column, text=title)
+        tree.column("score", width=80, anchor="center")
+        tree.column("name", width=220)
+        tree.column("date", width=150)
+        ranked_records = sorted(
+            self.records,
+            key=lambda record: (record.score, record.played_at),
+            reverse=True,
+        )
+        for record in ranked_records:
+            tree.insert("", "end", values=(record.score, record.name, record.played_at))
+        tree.pack(fill="both", expand=True)
+        ttk.Button(frame, text="Voltar", command=self.show_menu).pack(pady=(15, 0))
+
+    def show_options(self) -> None:
+        self.clear()
+        frame = ttk.Frame(self.root, padding=25)
+        frame.pack(expand=True)
+        ttk.Label(frame, text="OPÇÕES", font=("Arial", 20, "bold")).pack(pady=(0, 15))
+        ttk.Label(frame, text="Resolução").pack(anchor="w")
+        resolution = tk.StringVar(value=f"{self.settings.width}x{self.settings.height}")
+        ttk.Combobox(frame, textvariable=resolution, values=("20x10", "30x15", "40x20"), state="readonly").pack(fill="x", pady=5)
+        fullscreen = tk.BooleanVar(value=self.settings.fullscreen)
+        ttk.Checkbutton(frame, text="Abrir em tela cheia", variable=fullscreen).pack(anchor="w", pady=8)
+        ttk.Label(frame, text="Tema: Clássico (preparado para futuras opções)", foreground="#555").pack(pady=8)
+        ttk.Button(frame, text="Gráficos simples", command=self.show_graphics).pack(fill="x", pady=5)
+
+        def save_and_return() -> None:
+            self.settings.width, self.settings.height = map(int, resolution.get().split("x"))
+            self.settings.fullscreen = fullscreen.get()
+            save_settings(self.settings)
+            self.apply_window_settings()
+            self.show_menu()
+
+        ttk.Button(frame, text="Salvar e voltar", command=save_and_return).pack(fill="x", pady=5)
+        ttk.Button(frame, text="Voltar sem salvar", command=self.show_menu).pack(fill="x", pady=5)
+
+    def show_graphics(self) -> None:
+        messagebox.showinfo(
+            "Gráficos simples",
+            "ASCII: máxima compatibilidade e manutenção simples.\n\n"
+            "Unicode: símbolos mais bonitos, mas depende da fonte do sistema.\n\n"
+            "Cores: melhor leitura e feedback, mas depende do suporte visual.\n\n"
+            "A evolução pode separar sprites, paleta, animações e efeitos da "
+            "lógica atual, usando Canvas, tkinter ou pygame.",
         )
 
+    def start_game(self) -> None:
+        self.clear()
+        self.canvas = tk.Canvas(
+            self.root,
+            width=self.settings.width * self.cell_size,
+            height=self.settings.height * self.cell_size,
+            bg="#102018",
+            highlightthickness=0,
+        )
+        self.canvas.pack(padx=20, pady=(20, 5))
+        self.status = ttk.Label(self.root)
+        self.status.pack()
+        ttk.Label(self.root, text="Setas ou W/A/S/D para mover | Q para sair").pack(pady=(2, 15))
+        center = (self.settings.width // 2, self.settings.height // 2)
+        self.snake = [center, (center[0] - 1, center[1])]
+        self.food = self.random_food()
+        self.direction = self.next_direction = (1, 0)
+        self.score = 0
+        self.game_running = True
+        self.game_started = False
+        self.draw_game("Aperte qualquer tecla para iniciar o jogo")
 
-def clear_screen() -> None:
-    """Limpa a tela usando ANSI (compatível com terminais modernos)."""
+    def random_food(self) -> Optional[Point]:
+        available = [
+            (x, y)
+            for y in range(self.settings.height)
+            for x in range(self.settings.width)
+            if (x, y) not in self.snake
+        ]
+        return random.choice(available) if available else None
 
-    print("\033[2J\033[H", end="")
+    def draw_game(self, message: str = "") -> None:
+        self.canvas.delete("all")
+        for x, y in self.snake:
+            color = "#7ee787" if (x, y) == self.snake[0] else "#3fb950"
+            self.canvas.create_rectangle(x * self.cell_size, y * self.cell_size, (x + 1) * self.cell_size, (y + 1) * self.cell_size, fill=color, outline="#102018")
+        if self.food:
+            x, y = self.food
+            self.canvas.create_oval(x * self.cell_size + 4, y * self.cell_size + 4, (x + 1) * self.cell_size - 4, (y + 1) * self.cell_size - 4, fill="#ff6b6b", outline="")
+        record = best_record(self.records)
+        self.status.configure(text=f"Pontos: {self.score}    Recorde: {record.score} ({record.name})    {message}")
 
+    def on_key(self, event: tk.Event) -> None:
+        key = event.keysym.lower()
+        if not self.game_running:
+            return
+        if not self.game_started:
+            self.game_started = True
+            self.tick()
+            return
+        directions = {"up": (0, -1), "w": (0, -1), "down": (0, 1), "s": (0, 1), "left": (-1, 0), "a": (-1, 0), "right": (1, 0), "d": (1, 0)}
+        if key == "q":
+            self.end_game(self.score, True)
+        elif key in directions:
+            candidate = directions[key]
+            if candidate != (-self.direction[0], -self.direction[1]):
+                self.next_direction = candidate
 
-def hide_cursor() -> None:
-    print("\033[?25l", end="")
+    def tick(self) -> None:
+        if not self.game_running:
+            return
+        self.direction = self.next_direction
+        new_head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
+        grows = new_head == self.food
+        if not (0 <= new_head[0] < self.settings.width and 0 <= new_head[1] < self.settings.height) or new_head in (self.snake if grows else self.snake[:-1]):
+            self.end_game(self.score, False)
+            return
+        self.snake.insert(0, new_head)
+        if grows:
+            self.score += 1
+            self.food = self.random_food()
+        else:
+            self.snake.pop()
+        self.draw_game()
+        self.game_after_id = self.root.after(TICK_MS, self.tick)
 
-
-def show_cursor() -> None:
-    print("\033[?25h", end="")
-
-
-class Keyboard:
-    """
-    Leitor de teclado sem bloquear o jogo.
-
-    No Windows, msvcrt lê teclas imediatamente. Em Linux/macOS, o terminal
-    entra temporariamente em modo "raw" e select() verifica se há entrada.
-    """
-
-    def __init__(self) -> None:
-        self._windows = os.name == "nt"
-        self._old_terminal = None
-
-    def __enter__(self) -> "Keyboard":
-        if not self._windows:
-            import termios
-            import tty
-
-            self._old_terminal = termios.tcgetattr(sys.stdin)
-            tty.setcbreak(sys.stdin.fileno())
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        if not self._windows and self._old_terminal is not None:
-            import termios
-
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_terminal)
-
-    def read_key(self) -> Optional[str]:
-        """Retorna uma tecla ou None quando nenhuma tecla foi pressionada."""
-
-        if self._windows:
-            import msvcrt
-
-            if not msvcrt.kbhit():
-                return None
-            key = msvcrt.getwch()
-            if key in ("\x00", "\xe0"):  # Prefixo de teclas especiais no Windows.
-                key = msvcrt.getwch()
-                return {"H": "up", "P": "down", "K": "left", "M": "right"}.get(
-                    key
-                )
-            return key.lower()
-
-        ready, _, _ = select.select([sys.stdin], [], [], 0)
-        if not ready:
-            return None
-        key = sys.stdin.read(1)
-        if key == "\x1b":  # Sequência ANSI das setas: ESC [ A/B/C/D.
-            sequence = sys.stdin.read(2)
-            return {"\x1b[A": "up", "\x1b[B": "down", "\x1b[D": "left", "\x1b[C": "right"}.get(
-                key + sequence
-            )
-        return key.lower()
-
-
-def random_food(snake: list[Point]) -> Optional[Point]:
-    """Escolhe uma posição livre para a comida, se ainda houver alguma."""
-
-    free_cells = [
-        (x, y)
-        for y in range(HEIGHT)
-        for x in range(WIDTH)
-        if (x, y) not in snake
-    ]
-    return random.choice(free_cells) if free_cells else None
-
-
-def draw(snake: list[Point], food: Optional[Point], score: int, high_score: HighScore) -> None:
-    """Desenha uma nova moldura completa; esta função é o ponto de troca da UI."""
-
-    cells = {(x, y): "o" for x, y in snake}
-    if snake:
-        cells[snake[0]] = "@"
-    if food is not None:
-        cells[food] = "*"
-
-    lines = [f"Snake | Pontos: {score} | Recorde: {high_score.score} ({high_score.name})"]
-    lines.append("+" + "-" * WIDTH + "+")
-    for y in range(HEIGHT):
-        lines.append("|" + "".join(cells.get((x, y), " ") for x in range(WIDTH)) + "|")
-    lines.append("+" + "-" * WIDTH + "+")
-    lines.append("W/A/S/D ou setas para mover | Q para sair")
-    clear_screen()
-    print("\n".join(lines), flush=True)
-
-
-def ask_player_name() -> str:
-    """Solicita e normaliza o nome usado no registro do recorde."""
-
-    show_cursor()
-    while True:
-        name = input("\nNovo recorde! Digite seu nome: ").strip()
-        if name:
-            return name[:30]
-        print("O nome não pode ficar vazio.")
-
-
-def play(high_score: HighScore) -> tuple[int, bool]:
-    """Executa uma partida e retorna (pontuação, jogador_saiu)."""
-
-    snake: list[Point] = [(WIDTH // 2, HEIGHT // 2), (WIDTH // 2 - 1, HEIGHT // 2)]
-    direction: Point = (1, 0)
-    next_direction = direction
-    food = random_food(snake)
-    score = 0
-
-    with Keyboard() as keyboard:
-        hide_cursor()
-        try:
-            while True:
-                key = keyboard.read_key()
-                directions = {
-                    "up": (0, -1), "w": (0, -1),
-                    "down": (0, 1), "s": (0, 1),
-                    "left": (-1, 0), "a": (-1, 0),
-                    "right": (1, 0), "d": (1, 0),
-                }
-                if key == "q":
-                    return score, True
-                if key in directions:
-                    candidate = directions[key]
-                    # Impede a cobra de inverter e colidir consigo mesma.
-                    if candidate != (-direction[0], -direction[1]):
-                        next_direction = candidate
-
-                direction = next_direction
-                head_x, head_y = snake[0]
-                new_head = (head_x + direction[0], head_y + direction[1])
-
-                hit_wall = not (0 <= new_head[0] < WIDTH and 0 <= new_head[1] < HEIGHT)
-                grows = new_head == food
-                body_to_check = snake if grows else snake[:-1]
-                if hit_wall or new_head in body_to_check:
-                    return score, False
-
-                snake.insert(0, new_head)
-                if grows:
-                    score += 1
-                    food = random_food(snake)
-                else:
-                    snake.pop()
-
-                draw(snake, food, score, high_score)
-                time.sleep(TICK_SECONDS)
-        finally:
-            show_cursor()
+    def end_game(self, score: int, quit_requested: bool) -> None:
+        self.game_running = False
+        if self.game_after_id:
+            self.root.after_cancel(self.game_after_id)
+        if quit_requested:
+            self.show_menu()
+            return
+        previous_best = best_record(self.records).score
+        name = simpledialog.askstring("Partida encerrada", f"Você fez {score} ponto(s).\nDigite o nome do jogador:", parent=self.root)
+        if not name or not name.strip():
+            name = "Jogador"
+        record = Record(name.strip()[:30], score, datetime.now().strftime("%d/%m/%Y %H:%M"))
+        self.records.insert(0, record)
+        save_records(self.records)
+        if score > previous_best:
+            messagebox.showinfo("Parabéns!", f"Parabéns, {record.name}! Você estabeleceu um novo recorde de {score} pontos!", parent=self.root)
+        self.show_menu()
 
 
 def main() -> None:
-    """Controla o ciclo de partidas e a atualização do recorde."""
-
-    high_score = load_high_score()
-    clear_screen()
-    print("=== JOGO DA COBRINHA ===")
-    print(f"Recorde atual: {high_score.score} pontos por {high_score.name}")
-    input("Pressione ENTER para começar...")
-
-    while True:
-        score, quit_requested = play(high_score)
-        clear_screen()
-        if quit_requested:
-            print("Jogo encerrado.")
-            break
-
-        print(f"Fim de jogo! Você fez {score} ponto(s).")
-        if score > high_score.score:
-            high_score = HighScore(ask_player_name(), score)
-            save_high_score(high_score)
-            print(f"Recorde salvo: {high_score.score} pontos por {high_score.name}.")
-        else:
-            print(f"Recorde continua sendo {high_score.score} pontos por {high_score.name}.")
-
-        answer = input("\nJogar novamente? [s/N]: ").strip().lower()
-        if answer != "s":
-            break
-
-    show_cursor()
+    root = tk.Tk()
+    SnakeApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        show_cursor()
-        print("\nJogo encerrado.")
+    main()
