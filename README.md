@@ -16,11 +16,14 @@ cada partida o tabuleiro aparece congelado e aguarda qualquer tecla. Use
 **W/A/S/D** ou as setas para mover e **Q** para sair.
 
 Todos os resultados são salvos em `highscore.json`, em ordem dos mais recentes,
-e as preferências (resolução e tela cheia) em `settings.json`.
+e as preferências (resolução e tela cheia) em `settings.json`. A tela de
+Records ordena as partidas da maior pontuação para a menor.
 
 O menu **Gráficos simples** apresenta os prós e contras de ASCII, Unicode e
-cores, além de orientar a evolução para sprites, animações e efeitos. O Canvas
-mantém a renderização separada da lógica para permitir temas futuros.
+cores, além de orientar a evolução para sprites, fundos, animações e efeitos.
+Ao final de cada partida, a janela **Próximos passos gráficos** detalha como
+usar imagens, spritesheets, paletas de temas e pygame. O Canvas mantém a
+renderização separada da lógica para permitir essas melhorias.
 
 ## Organização para estudo
 
