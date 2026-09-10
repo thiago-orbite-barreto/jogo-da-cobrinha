@@ -21,9 +21,7 @@ Records ordena as partidas da maior pontuação para a menor.
 
 O menu **Gráficos simples** apresenta os prós e contras de ASCII, Unicode e
 cores, além de orientar a evolução para sprites, fundos, animações e efeitos.
-Ao final de cada partida, a janela **Próximos passos gráficos** detalha como
-usar imagens, spritesheets, paletas de temas e pygame. O Canvas mantém a
-renderização separada da lógica para permitir essas melhorias.
+O Canvas mantém a renderização separada da lógica para permitir essas melhorias.
 
 ## Organização para estudo
 

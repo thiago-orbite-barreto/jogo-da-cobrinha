@@ -273,25 +273,6 @@ class SnakeApp:
         save_records(self.records)
         if score > previous_best:
             messagebox.showinfo("Parabéns!", f"Parabéns, {record.name}! Você estabeleceu um novo recorde de {score} pontos!", parent=self.root)
-        messagebox.showinfo(
-            "Próximos passos gráficos",
-            "Para evoluir os gráficos do jogo:\n\n"
-            "- Sprites: substituir os retângulos por imagens PNG ou GIF para "
-            "a cabeça, o corpo e a comida. Uma spritesheet permite várias "
-            "direções e animações.\n\n"
-            "- Fundo: criar um desenho de fundo no Canvas, com textura, "
-            "grades, obstáculos e elementos decorativos sem misturar isso "
-            "com as regras de colisão.\n\n"
-            "- Animações e efeitos: interpolar o movimento, animar a comida, "
-            "adicionar partículas ao coletar pontos e transições entre telas.\n\n"
-            "- Temas: centralizar cores, fontes, sprites e fundos em uma "
-            "paleta configurável. Assim, novos temas podem ser adicionados "
-            "sem alterar a lógica da partida.\n\n"
-            "- Evolução da tecnologia: o Canvas atende gráficos simples; "
-            "pygame seria adequado para áudio, animações e controles mais "
-            "avançados.",
-            parent=self.root,
-        )
         self.show_menu()
 
 
