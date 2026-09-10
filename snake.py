@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import random
+import subprocess
+import sys
 import tkinter as tk
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +20,7 @@ TICK_MS = 120
 SCORE_FILE = Path(__file__).with_name("highscore.json")
 SETTINGS_FILE = Path(__file__).with_name("settings.json")
 Point = tuple[int, int]
+MENU_MUSIC_FILE = Path(__file__).with_name("menu_theme.mp3")
 
 
 @dataclass
@@ -84,6 +88,44 @@ def best_record(records: list[Record]) -> Record:
     return max(records, key=lambda record: record.score, default=Record("Ninguém", 0, ""))
 
 
+class AudioPlayer:
+    """Reproduz a música do menu sem exigir dependências externas."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.process: Optional[subprocess.Popen[bytes]] = None
+        self.alias = "snake_menu_theme"
+
+    def play_loop(self) -> None:
+        if not self.file.exists():
+            return
+        if os.name == "nt":
+            import ctypes
+
+            command = f'open "{self.file}" type mpegvideo alias {self.alias}'
+            ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
+            ctypes.windll.winmm.mciSendStringW(f"play {self.alias} repeat", None, 0, None)
+            return
+        player = "afplay" if sys.platform == "darwin" else "ffplay"
+        try:
+            arguments = [player, "-nodisp", "-autoexit", str(self.file)]
+            if player == "ffplay":
+                arguments[1:1] = ["-loglevel", "quiet", "-loop", "0"]
+            self.process = subprocess.Popen(arguments)
+        except FileNotFoundError:
+            self.process = None
+
+    def stop(self) -> None:
+        if os.name == "nt":
+            import ctypes
+
+            ctypes.windll.winmm.mciSendStringW(f"stop {self.alias}", None, 0, None)
+            ctypes.windll.winmm.mciSendStringW(f"close {self.alias}", None, 0, None)
+        elif self.process is not None:
+            self.process.terminate()
+            self.process = None
+
+
 class SnakeApp:
     """Janela principal, menus e partida do jogo."""
 
@@ -100,10 +142,12 @@ class SnakeApp:
         self.game_running = False
         self.game_started = False
         self.game_after_id: Optional[str] = None
+        self.audio = AudioPlayer(MENU_MUSIC_FILE)
         self.root.title("Jogo da Cobrinha")
-        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+        self.root.protocol("WM_DELETE_WINDOW", self.close_app)
         self.root.bind("<KeyPress>", self.on_key)
         self.apply_window_settings()
+        self.audio.play_loop()
         self.show_menu()
 
     def apply_window_settings(self) -> None:
@@ -117,15 +161,60 @@ class SnakeApp:
 
     def show_menu(self) -> None:
         self.clear()
-        frame = ttk.Frame(self.root, padding=35)
-        frame.pack(expand=True)
-        ttk.Label(frame, text="JOGO DA COBRINHA", font=("Arial", 24, "bold")).pack(pady=(0, 20))
-        ttk.Button(frame, text="Iniciar jogo", command=self.start_game).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Records", command=self.show_records).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Opções", command=self.show_options).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Sair", command=self.root.destroy).pack(fill="x", pady=5)
+        self.menu_canvas = tk.Canvas(
+            self.root, bg="#090d1c", highlightthickness=0,
+            width=620, height=520,
+        )
+        self.menu_canvas.pack(fill="both", expand=True)
+        self.menu_items = ("Iniciar jogo", "Records", "Opções", "Sair")
+        self.menu_index = 0
+        self.menu_canvas.bind("<KeyPress>", self.on_menu_key)
+        self.menu_canvas.focus_set()
+        self.menu_canvas.create_text(310, 105, text="SNAKE", fill="#69b7e8", font=("Times New Roman", 42, "bold"))
+        self.menu_canvas.create_text(310, 150, text="THE QUIET HOUR", fill="#dce9f2", font=("Times New Roman", 18, "bold"))
+        self.menu_canvas.create_line(160, 175, 460, 175, fill="#31577a", width=2)
+        self.menu_canvas.create_text(310, 205, text="Uma aventura em escamas", fill="#7f9ab0", font=("Arial", 11, "italic"))
+        self.menu_canvas.bind("<Button-1>", self.on_menu_click)
+        self.render_menu_items()
         record = best_record(self.records)
-        ttk.Label(frame, text=f"Melhor resultado: {record.score} pontos ({record.name})").pack(pady=(20, 0))
+        self.menu_canvas.create_text(310, 435, text=f"Melhor resultado: {record.score} pontos ({record.name})", fill="#91a8bc", font=("Arial", 10))
+        self.menu_canvas.create_text(310, 475, text="↑ ↓ navegar     ENTER selecionar     ESC sair", fill="#526b80", font=("Arial", 9))
+
+    def render_menu_items(self) -> None:
+        self.menu_canvas.delete("menu_item")
+        for index, item in enumerate(self.menu_items):
+            y = 270 + index * 36
+            selected = index == self.menu_index
+            color = "#f4c95d" if selected else "#d6e1e8"
+            prefix = "▶  " if selected else "   "
+            self.menu_canvas.create_text(310, y, text=prefix + item, fill=color, font=("Arial", 15, "bold" if selected else "normal"), tags="menu_item")
+
+    def on_menu_key(self, event: tk.Event) -> None:
+        key = event.keysym.lower()
+        if key in ("up", "w"):
+            self.menu_index = (self.menu_index - 1) % len(self.menu_items)
+            self.render_menu_items()
+        elif key in ("down", "s"):
+            self.menu_index = (self.menu_index + 1) % len(self.menu_items)
+            self.render_menu_items()
+        elif key in ("return", "space"):
+            self.select_menu_item()
+        elif key == "escape":
+            self.close_app()
+
+    def on_menu_click(self, event: tk.Event) -> None:
+        index = round((event.y - 270) / 36)
+        if 0 <= index < len(self.menu_items):
+            self.menu_index = index
+            self.select_menu_item()
+
+    def select_menu_item(self) -> None:
+        actions = (self.start_game, self.show_records, self.show_options, self.close_app)
+        actions[self.menu_index]()
+
+    def close_app(self) -> None:
+        self.audio.stop()
+        self.root.destroy()
 
     def show_records(self) -> None:
         self.clear()
