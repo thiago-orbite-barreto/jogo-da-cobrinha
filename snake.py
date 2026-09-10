@@ -147,11 +147,28 @@ class SnakeGame:
         items = ("Iniciar jogo", "Records", "Opções", "Sair")
         for index, item in enumerate(items):
             color = GOLD if index == self.menu_index else TEXT
-            prefix = "▶  " if index == self.menu_index else "   "
-            self.draw_text(prefix + item, (self.screen.get_width() // 2, 180 + index * 43), self.font, color)
+            y = 180 + index * 43
+            self.draw_text(item, (self.screen.get_width() // 2, y), self.font, color)
+            if index == self.menu_index:
+                self.draw_glove((self.screen.get_width() // 2 - 150, y))
         record = best_record(self.records)
         self.draw_text(f"Melhor resultado: {record.score} pontos ({record.name})", (self.screen.get_width() // 2, self.screen.get_height() - 55), self.small_font, MUTED)
-        self.draw_text("↑ ↓ navegar     ENTER selecionar     ESC sair", (self.screen.get_width() // 2, self.screen.get_height() - 25), self.small_font, (82, 107, 128))
+        self.draw_text("W/S navegar     ENTER selecionar     ESC sair", (self.screen.get_width() // 2, self.screen.get_height() - 25), self.small_font, (82, 107, 128))
+
+    def draw_glove(self, position: tuple[int, int]) -> None:
+        """Desenha o seletor como uma luvinha, sem depender de glifos Unicode."""
+
+        x, y = position
+        outline = (30, 38, 48)
+        glove = (238, 238, 214)
+        shadow = (174, 181, 177)
+        pygame.draw.ellipse(self.screen, outline, (x - 16, y - 12, x + 14, y + 14))
+        pygame.draw.ellipse(self.screen, glove, (x - 13, y - 9, x + 11, y + 11))
+        pygame.draw.rect(self.screen, glove, (x - 9, y - 23, x - 2, y + 1), border_radius=3)
+        pygame.draw.rect(self.screen, glove, (x - 1, y - 27, x + 6, y + 1), border_radius=3)
+        pygame.draw.rect(self.screen, glove, (x + 7, y - 20, x + 14, y + 2), border_radius=3)
+        pygame.draw.polygon(self.screen, glove, ((x - 13, y - 2), (x - 27, y - 13), (x - 30, y - 8), (x - 12, y + 8)))
+        pygame.draw.line(self.screen, shadow, (x - 10, y + 8), (x + 8, y + 8), 2)
 
     def draw_records(self) -> None:
         self.draw_header("Records")
