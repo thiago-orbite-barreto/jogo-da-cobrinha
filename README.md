@@ -1,7 +1,7 @@
 # Jogo da Cobrinha em Python
 
-Um jogo da cobrinha com interface gráfica em uma janela Tkinter, usando somente
-a biblioteca padrão do Python. O menu inicial possui ambientação escura,
+Um jogo da cobrinha com interface gráfica em uma janela Pygame. O menu inicial
+possui ambientação escura,
 tipografia serifada, destaque dourado e navegação por teclado, inspirado na
 composição de menus clássicos de RPG sem reproduzir logotipos ou artes de
 terceiros.
@@ -11,6 +11,7 @@ terceiros.
 No Windows, Linux ou macOS:
 
 ```text
+pip install -r requirements.txt
 python snake.py
 ```
 
