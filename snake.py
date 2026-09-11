@@ -1,22 +1,39 @@
-"""Jogo da cobrinha com interface gráfica Tkinter."""
+"""Jogo da Cobrinha com UI unificada em Pygame."""
 
 from __future__ import annotations
 
 import json
 import random
-import tkinter as tk
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, simpledialog, ttk
 from typing import Optional
+
+import pygame
 
 DEFAULT_WIDTH = 30
 DEFAULT_HEIGHT = 15
+CELL_SIZE = 24
 TICK_MS = 120
 SCORE_FILE = Path(__file__).with_name("highscore.json")
 SETTINGS_FILE = Path(__file__).with_name("settings.json")
+MENU_MUSIC_FILE = Path(__file__).with_name("menu_theme.mp3")
+SELECT_SOUND_FILE = Path(__file__).with_name("menu_select.mp3")
+GAME_MUSIC_FILE = Path(__file__).with_name("game_theme.mp3")
 Point = tuple[int, int]
+
+NAVY = (9, 13, 28)
+PANEL = (18, 29, 49)
+PLAYFIELD = (16, 32, 24)
+PLAYFIELD_BORDER = (105, 183, 232)
+PLAYFIELD_GRID = (27, 55, 39)
+BLUE = (105, 183, 232)
+TEXT = (214, 225, 232)
+MUTED = (127, 154, 176)
+GOLD = (244, 201, 93)
+GREEN = (63, 185, 80)
+RED = (255, 107, 107)
 
 
 @dataclass
@@ -32,6 +49,8 @@ class Settings:
     height: int = DEFAULT_HEIGHT
     fullscreen: bool = False
     theme: str = "Clássico"
+    music_enabled: bool = True
+    sound_effects_enabled: bool = True
 
 
 def load_records() -> list[Record]:
@@ -54,23 +73,22 @@ def load_records() -> list[Record]:
 
 
 def save_records(records: list[Record]) -> None:
-    SCORE_FILE.write_text(
-        json.dumps([record.__dict__ for record in records], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    SCORE_FILE.write_text(json.dumps([record.__dict__ for record in records], ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_settings() -> Settings:
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        settings = Settings(
-            int(data.get("width", DEFAULT_WIDTH)),
-            int(data.get("height", DEFAULT_HEIGHT)),
-            bool(data.get("fullscreen", False)),
-            str(data.get("theme", "Clássico")),
-        )
+        settings = Settings(int(data.get("width", DEFAULT_WIDTH)), int(data.get("height", DEFAULT_HEIGHT)), bool(data.get("fullscreen", False)), str(data.get("theme", "Clássico")))
+        settings.music_enabled = bool(data.get("music_enabled", True))
+        settings.sound_effects_enabled = bool(data.get("sound_effects_enabled", True))
         if (settings.width, settings.height) not in {(20, 10), (30, 15), (40, 20)}:
-            return Settings(theme=settings.theme, fullscreen=settings.fullscreen)
+            return Settings(
+                fullscreen=settings.fullscreen,
+                theme=settings.theme,
+                music_enabled=settings.music_enabled,
+                sound_effects_enabled=settings.sound_effects_enabled,
+            )
         return settings
     except (FileNotFoundError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
         return Settings()
@@ -81,206 +99,343 @@ def save_settings(settings: Settings) -> None:
 
 
 def best_record(records: list[Record]) -> Record:
-    return max(records, key=lambda record: record.score, default=Record("Ninguém", 0, ""))
+    return max(records, key=lambda item: item.score, default=Record("Ninguém", 0, ""))
 
 
-class SnakeApp:
-    """Janela principal, menus e partida do jogo."""
-
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
-        self.records = load_records()
+class SnakeGame:
+    def __init__(self) -> None:
+        pygame.init()
+        try:
+            pygame.mixer.init()
+        except pygame.error:
+            pass
         self.settings = load_settings()
-        self.cell_size = 24
-        self.snake: list[Point] = []
-        self.food: Optional[Point] = None
-        self.direction: Point = (1, 0)
-        self.next_direction: Point = self.direction
-        self.score = 0
-        self.game_running = False
-        self.game_started = False
-        self.game_after_id: Optional[str] = None
-        self.root.title("Jogo da Cobrinha")
-        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
-        self.root.bind("<KeyPress>", self.on_key)
-        self.apply_window_settings()
-        self.show_menu()
+        flags = pygame.FULLSCREEN if self.settings.fullscreen else 0
+        self.screen = pygame.display.set_mode(self.window_size(), flags)
+        pygame.display.set_caption("Jogo da Cobrinha")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.Font(None, 28)
+        self.title_font = pygame.font.Font(None, 54)
+        self.small_font = pygame.font.Font(None, 21)
+        self.records = load_records()
+        self.state = "menu"
+        self.menu_index = 0
+        self.running = True
+        self.music_playing = False
+        self.select_sound: Optional[pygame.mixer.Sound] = None
+        if pygame.mixer.get_init() and SELECT_SOUND_FILE.exists():
+            try:
+                self.select_sound = pygame.mixer.Sound(str(SELECT_SOUND_FILE))
+            except pygame.error:
+                self.select_sound = None
+        self.start_menu_music()
 
-    def apply_window_settings(self) -> None:
-        self.root.attributes("-fullscreen", self.settings.fullscreen)
-        if not self.settings.fullscreen:
-            self.root.geometry(f"{self.settings.width * self.cell_size + 40}x{self.settings.height * self.cell_size + 150}")
+    def window_size(self) -> tuple[int, int]:
+        return (self.settings.width * CELL_SIZE + 40, self.settings.height * CELL_SIZE + 150)
 
-    def clear(self) -> None:
-        for child in self.root.winfo_children():
-            child.destroy()
+    def start_menu_music(self) -> None:
+        if self.settings.music_enabled and MENU_MUSIC_FILE.exists() and not self.music_playing:
+            try:
+                if not pygame.mixer.get_init():
+                    return
+                pygame.mixer.music.load(str(MENU_MUSIC_FILE))
+                pygame.mixer.music.play(-1)
+                self.music_playing = True
+            except pygame.error:
+                self.music_playing = False
 
-    def show_menu(self) -> None:
-        self.clear()
-        frame = ttk.Frame(self.root, padding=35)
-        frame.pack(expand=True)
-        ttk.Label(frame, text="JOGO DA COBRINHA", font=("Arial", 24, "bold")).pack(pady=(0, 20))
-        ttk.Button(frame, text="Iniciar jogo", command=self.start_game).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Records", command=self.show_records).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Opções", command=self.show_options).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Sair", command=self.root.destroy).pack(fill="x", pady=5)
+    def stop_menu_music(self) -> None:
+        if self.music_playing:
+            pygame.mixer.music.stop()
+            self.music_playing = False
+
+    def play_selection_sound(self) -> None:
+        if self.settings.sound_effects_enabled and self.select_sound is not None:
+            self.select_sound.play()
+
+    def start_game_music(self) -> None:
+        if self.settings.music_enabled and pygame.mixer.get_init() and GAME_MUSIC_FILE.exists():
+            try:
+                pygame.mixer.music.load(str(GAME_MUSIC_FILE))
+                pygame.mixer.music.play(-1)
+            except pygame.error:
+                pass
+
+    def stop_music(self) -> None:
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+        self.music_playing = False
+
+    def draw_text(self, text: str, position: tuple[int, int], font: pygame.font.Font, color: tuple[int, int, int] = TEXT, center: bool = True) -> None:
+        surface = font.render(text, True, color)
+        rect = surface.get_rect()
+        rect.center = position if center else (position[0] + rect.width // 2, position[1] + rect.height // 2)
+        if not center:
+            rect.topleft = position
+        self.screen.blit(surface, rect)
+
+    def draw_header(self, title: str) -> None:
+        self.screen.fill(NAVY)
+        self.draw_text(title, (self.screen.get_width() // 2, 72), self.title_font, BLUE)
+        pygame.draw.line(self.screen, (49, 87, 122), (self.screen.get_width() // 2 - 150, 105), (self.screen.get_width() // 2 + 150, 105), 2)
+
+    def draw_menu(self) -> None:
+        self.draw_header("Jogo da Cobrinha")
+        items = ("Iniciar jogo", "Records", "Opções", "Sair")
+        for index, item in enumerate(items):
+            color = GOLD if index == self.menu_index else TEXT
+            y = 180 + index * 43
+            self.draw_text(item, (self.screen.get_width() // 2, y), self.font, color)
+            if index == self.menu_index:
+                self.draw_selector((self.screen.get_width() // 2 - 150, y))
         record = best_record(self.records)
-        ttk.Label(frame, text=f"Melhor resultado: {record.score} pontos ({record.name})").pack(pady=(20, 0))
+        self.draw_text(f"Melhor resultado: {record.score} pontos ({record.name})", (self.screen.get_width() // 2, self.screen.get_height() - 55), self.small_font, MUTED)
+        self.draw_text("W/S navegar     ENTER selecionar     ESC sair", (self.screen.get_width() // 2, self.screen.get_height() - 25), self.small_font, (82, 107, 128))
 
-    def show_records(self) -> None:
-        self.clear()
-        frame = ttk.Frame(self.root, padding=25)
-        frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="RECORDS", font=("Arial", 20, "bold")).pack(pady=(0, 15))
-        tree = ttk.Treeview(frame, columns=("score", "name", "date"), show="headings", height=12)
-        for column, title in (("score", "Pontos"), ("name", "Jogador"), ("date", "Data")):
-            tree.heading(column, text=title)
-        tree.column("score", width=80, anchor="center")
-        tree.column("name", width=220)
-        tree.column("date", width=150)
-        ranked_records = sorted(
-            self.records,
-            key=lambda record: (record.score, record.played_at),
-            reverse=True,
+    def draw_selector(self, position: tuple[int, int]) -> None:
+        """Desenha um ponto circular como seletor da opção ativa."""
+
+        x, y = position
+        pygame.draw.circle(self.screen, GOLD, (x, y), 7)
+
+    def draw_records(self) -> None:
+        self.draw_header("Records")
+        ranked = sorted(self.records, key=lambda item: (item.score, item.played_at), reverse=True)
+        self.draw_text("PONTOS", (self.screen.get_width() // 2 - 160, 135), self.small_font, MUTED)
+        self.draw_text("JOGADOR", (self.screen.get_width() // 2 - 35, 135), self.small_font, MUTED)
+        self.draw_text("DATA", (self.screen.get_width() // 2 + 150, 135), self.small_font, MUTED)
+        for index, record in enumerate(ranked[:10]):
+            y = 170 + index * 30
+            self.draw_text(f"{record.score}", (self.screen.get_width() // 2 - 160, y), self.font, GOLD)
+            self.draw_text(record.name, (self.screen.get_width() // 2 - 35, y), self.small_font)
+            self.draw_text(record.played_at, (self.screen.get_width() // 2 + 150, y), self.small_font, MUTED)
+        if not ranked:
+            self.draw_text("Nenhuma partida registrada.", (self.screen.get_width() // 2, 220), self.font, MUTED)
+        self.draw_text("ESC ou ENTER para voltar", (self.screen.get_width() // 2, self.screen.get_height() - 35), self.small_font, MUTED)
+
+    def draw_options(self) -> None:
+        self.draw_header("Opções")
+        values = (
+            (f"Resolução: {self.settings.width}x{self.settings.height}", None),
+            ("Tela cheia", self.settings.fullscreen),
+            ("Música", self.settings.music_enabled),
+            ("Efeitos sonoros", self.settings.sound_effects_enabled),
+            "Tema: Clássico (futuro)",
         )
-        for record in ranked_records:
-            tree.insert("", "end", values=(record.score, record.name, record.played_at))
-        tree.pack(fill="both", expand=True)
-        ttk.Button(frame, text="Voltar", command=self.show_menu).pack(pady=(15, 0))
+        for index, value in enumerate(values):
+            color = GOLD if index == self.menu_index else TEXT
+            y = 180 + index * 48
+            if isinstance(value, tuple):
+                label, enabled = value
+                self.draw_text(label, (self.screen.get_width() // 2, y), self.font, color)
+                if enabled is not None:
+                    self.draw_checkbox((self.screen.get_width() // 2 - 170, y), enabled, index == self.menu_index)
+            else:
+                self.draw_text(value, (self.screen.get_width() // 2, y), self.font, color)
+        self.draw_text("ENTER altera     ESC volta", (self.screen.get_width() // 2, self.screen.get_height() - 35), self.small_font, MUTED)
 
-    def show_options(self) -> None:
-        self.clear()
-        frame = ttk.Frame(self.root, padding=25)
-        frame.pack(expand=True)
-        ttk.Label(frame, text="OPÇÕES", font=("Arial", 20, "bold")).pack(pady=(0, 15))
-        ttk.Label(frame, text="Resolução").pack(anchor="w")
-        resolution = tk.StringVar(value=f"{self.settings.width}x{self.settings.height}")
-        ttk.Combobox(frame, textvariable=resolution, values=("20x10", "30x15", "40x20"), state="readonly").pack(fill="x", pady=5)
-        fullscreen = tk.BooleanVar(value=self.settings.fullscreen)
-        ttk.Checkbutton(frame, text="Abrir em tela cheia", variable=fullscreen).pack(anchor="w", pady=8)
-        ttk.Label(frame, text="Tema: Clássico (preparado para futuras opções)", foreground="#555").pack(pady=8)
-        ttk.Button(frame, text="Gráficos simples", command=self.show_graphics).pack(fill="x", pady=5)
+    def draw_checkbox(self, position: tuple[int, int], checked: bool, selected: bool) -> None:
+        """Desenha checkbox vetorial sem depender de caracteres de fonte."""
 
-        def save_and_return() -> None:
-            self.settings.width, self.settings.height = map(int, resolution.get().split("x"))
-            self.settings.fullscreen = fullscreen.get()
-            save_settings(self.settings)
-            self.apply_window_settings()
-            self.show_menu()
+        x, y = position
+        border = GOLD if selected else MUTED
+        pygame.draw.rect(self.screen, border, (x - 12, y - 12, 24, 24), width=2, border_radius=3)
+        if checked:
+            pygame.draw.rect(self.screen, GOLD if selected else BLUE, (x - 7, y - 7, 14, 14), border_radius=2)
 
-        ttk.Button(frame, text="Salvar e voltar", command=save_and_return).pack(fill="x", pady=5)
-        ttk.Button(frame, text="Voltar sem salvar", command=self.show_menu).pack(fill="x", pady=5)
-
-    def show_graphics(self) -> None:
-        messagebox.showinfo(
-            "Gráficos simples",
-            "ASCII: máxima compatibilidade e manutenção simples.\n\n"
-            "Unicode: símbolos mais bonitos, mas depende da fonte do sistema.\n\n"
-            "Cores: melhor leitura e feedback, mas depende do suporte visual.\n\n"
-            "A evolução pode separar sprites, paleta, animações e efeitos da "
-            "lógica atual, usando Canvas, tkinter ou pygame.",
-        )
-
-    def start_game(self) -> None:
-        self.clear()
-        self.canvas = tk.Canvas(
-            self.root,
-            width=self.settings.width * self.cell_size,
-            height=self.settings.height * self.cell_size,
-            bg="#102018",
-            highlightthickness=0,
-        )
-        self.canvas.pack(padx=20, pady=(20, 5))
-        self.status = ttk.Label(self.root)
-        self.status.pack()
-        ttk.Label(self.root, text="Setas ou W/A/S/D para mover | Q para sair").pack(pady=(2, 15))
+    def new_game(self) -> None:
+        self.stop_menu_music()
+        self.start_game_music()
         center = (self.settings.width // 2, self.settings.height // 2)
         self.snake = [center, (center[0] - 1, center[1])]
         self.food = self.random_food()
         self.direction = self.next_direction = (1, 0)
         self.score = 0
-        self.game_running = True
         self.game_started = False
-        self.draw_game("Aperte qualquer tecla para iniciar o jogo")
+        self.last_tick = pygame.time.get_ticks()
+        self.state = "game"
 
     def random_food(self) -> Optional[Point]:
-        available = [
-            (x, y)
-            for y in range(self.settings.height)
-            for x in range(self.settings.width)
-            if (x, y) not in self.snake
-        ]
-        return random.choice(available) if available else None
+        free = [(x, y) for y in range(self.settings.height) for x in range(self.settings.width) if (x, y) not in self.snake]
+        return random.choice(free) if free else None
 
-    def draw_game(self, message: str = "") -> None:
-        self.canvas.delete("all")
+    def draw_game(self) -> None:
+        self.screen.fill(NAVY)
+        field_width = self.settings.width * CELL_SIZE
+        field_height = self.settings.height * CELL_SIZE
+        offset_x, offset_y = 20, 62
+        field_rect = pygame.Rect(offset_x, offset_y, field_width, field_height)
+        pygame.draw.rect(self.screen, PANEL, (0, 0, self.screen.get_width(), 48))
+        pygame.draw.rect(self.screen, PANEL, (0, offset_y + field_height + 8, self.screen.get_width(), self.screen.get_height() - offset_y - field_height - 8))
+        pygame.draw.rect(self.screen, PLAYFIELD, field_rect)
+        for x in range(1, self.settings.width):
+            grid_x = offset_x + x * CELL_SIZE
+            pygame.draw.line(self.screen, PLAYFIELD_GRID, (grid_x, offset_y), (grid_x, offset_y + field_height))
+        for y in range(1, self.settings.height):
+            grid_y = offset_y + y * CELL_SIZE
+            pygame.draw.line(self.screen, PLAYFIELD_GRID, (offset_x, grid_y), (offset_x + field_width, grid_y))
+        pygame.draw.rect(self.screen, PLAYFIELD_BORDER, field_rect, width=3)
         for x, y in self.snake:
-            color = "#7ee787" if (x, y) == self.snake[0] else "#3fb950"
-            self.canvas.create_rectangle(x * self.cell_size, y * self.cell_size, (x + 1) * self.cell_size, (y + 1) * self.cell_size, fill=color, outline="#102018")
+            color = (126, 231, 135) if (x, y) == self.snake[0] else GREEN
+            pygame.draw.rect(self.screen, color, (offset_x + x * CELL_SIZE, offset_y + y * CELL_SIZE, CELL_SIZE - 2, CELL_SIZE - 2))
         if self.food:
             x, y = self.food
-            self.canvas.create_oval(x * self.cell_size + 4, y * self.cell_size + 4, (x + 1) * self.cell_size - 4, (y + 1) * self.cell_size - 4, fill="#ff6b6b", outline="")
+            pygame.draw.circle(self.screen, RED, (offset_x + x * CELL_SIZE + CELL_SIZE // 2, offset_y + y * CELL_SIZE + CELL_SIZE // 2), CELL_SIZE // 2 - 4)
         record = best_record(self.records)
-        self.status.configure(text=f"Pontos: {self.score}    Recorde: {record.score} ({record.name})    {message}")
+        message = "Aperte qualquer tecla para iniciar o jogo" if not self.game_started else f"Pontos: {self.score} | Recorde: {record.score} ({record.name})"
+        self.draw_text(message, (self.screen.get_width() // 2, 30), self.small_font, GOLD if not self.game_started else TEXT)
+        self.draw_text("Setas ou W/A/S/D para mover | Q para sair", (self.screen.get_width() // 2, self.screen.get_height() - 20), self.small_font, MUTED)
 
-    def on_key(self, event: tk.Event) -> None:
-        key = event.keysym.lower()
-        if not self.game_running:
-            return
-        if not self.game_started:
-            self.game_started = True
-            self.tick()
-            return
-        directions = {"up": (0, -1), "w": (0, -1), "down": (0, 1), "s": (0, 1), "left": (-1, 0), "a": (-1, 0), "right": (1, 0), "d": (1, 0)}
-        if key == "q":
-            self.end_game(self.score, True)
-        elif key in directions:
-            candidate = directions[key]
-            if candidate != (-self.direction[0], -self.direction[1]):
-                self.next_direction = candidate
-
-    def tick(self) -> None:
-        if not self.game_running:
-            return
+    def move(self) -> None:
         self.direction = self.next_direction
-        new_head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
-        grows = new_head == self.food
-        if not (0 <= new_head[0] < self.settings.width and 0 <= new_head[1] < self.settings.height) or new_head in (self.snake if grows else self.snake[:-1]):
-            self.end_game(self.score, False)
+        head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
+        grows = head == self.food
+        if not (0 <= head[0] < self.settings.width and 0 <= head[1] < self.settings.height) or head in (self.snake if grows else self.snake[:-1]):
+            self.finish_game()
             return
-        self.snake.insert(0, new_head)
+        self.snake.insert(0, head)
         if grows:
             self.score += 1
             self.food = self.random_food()
         else:
             self.snake.pop()
-        self.draw_game()
-        self.game_after_id = self.root.after(TICK_MS, self.tick)
 
-    def end_game(self, score: int, quit_requested: bool) -> None:
-        self.game_running = False
-        if self.game_after_id:
-            self.root.after_cancel(self.game_after_id)
-        if quit_requested:
-            self.show_menu()
-            return
-        previous_best = best_record(self.records).score
-        name = simpledialog.askstring("Partida encerrada", f"Você fez {score} ponto(s).\nDigite o nome do jogador:", parent=self.root)
-        if not name or not name.strip():
-            name = "Jogador"
-        record = Record(name.strip()[:30], score, datetime.now().strftime("%d/%m/%Y %H:%M"))
+    def finish_game(self) -> None:
+        previous = best_record(self.records).score
+        self.state = "name"
+        self.name_input = ""
+        self.previous_best = previous
+        self.stop_music()
+        pygame.key.stop_text_input()
+        pygame.key.start_text_input()
+
+    def draw_name(self) -> None:
+        self.draw_header("Partida encerrada")
+        self.draw_text(f"Pontuação: {self.score}", (self.screen.get_width() // 2, 170), self.font, GOLD)
+        self.draw_text("Digite o nome do jogador:", (self.screen.get_width() // 2, 225), self.font)
+        pygame.draw.rect(self.screen, PANEL, (self.screen.get_width() // 2 - 180, 255, 360, 42), border_radius=5)
+        self.draw_text(self.name_input + "_", (self.screen.get_width() // 2, 276), self.font)
+        self.draw_text("ENTER confirmar     ESC cancelar", (self.screen.get_width() // 2, self.screen.get_height() - 45), self.small_font, MUTED)
+
+    def save_name(self) -> None:
+        name = self.name_input.strip() or "Jogador"
+        record = Record(name[:30], self.score, datetime.now().strftime("%d/%m/%Y %H:%M"))
         self.records.insert(0, record)
         save_records(self.records)
-        if score > previous_best:
-            messagebox.showinfo("Parabéns!", f"Parabéns, {record.name}! Você estabeleceu um novo recorde de {score} pontos!", parent=self.root)
-        self.show_menu()
+        if self.score > self.previous_best:
+            self.notice = f"Parabéns, {record.name}! Novo recorde: {self.score} pontos."
+            self.state = "notice"
+        else:
+            self.show_menu()
 
+    def handle_key(self, event: pygame.event.Event) -> None:
+        key = event.key
+        if self.state == "menu":
+            if key in (pygame.K_UP, pygame.K_w):
+                self.menu_index = (self.menu_index - 1) % 4
+                self.play_selection_sound()
+            elif key in (pygame.K_DOWN, pygame.K_s):
+                self.menu_index = (self.menu_index + 1) % 4
+                self.play_selection_sound()
+            elif key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.play_selection_sound()
+                (self.new_game, lambda: self.set_state("records"), lambda: self.set_state("options"), self.close)[self.menu_index]()
+            elif key == pygame.K_ESCAPE:
+                self.close()
+        elif self.state in ("records", "options"):
+            if self.state == "options" and key in (pygame.K_UP, pygame.K_w):
+                self.menu_index = (self.menu_index - 1) % 5
+                self.play_selection_sound()
+            elif self.state == "options" and key in (pygame.K_DOWN, pygame.K_s):
+                self.menu_index = (self.menu_index + 1) % 5
+                self.play_selection_sound()
+            elif key in (pygame.K_ESCAPE, pygame.K_RETURN) and self.state == "records":
+                self.show_menu()
+            elif key == pygame.K_ESCAPE:
+                self.show_menu()
+            elif self.state == "options" and key == pygame.K_RETURN:
+                self.change_option()
+        elif self.state == "game":
+            if not self.game_started:
+                self.game_started = True
+            elif key == pygame.K_q:
+                self.show_menu()
+            else:
+                directions = {pygame.K_UP: (0, -1), pygame.K_w: (0, -1), pygame.K_DOWN: (0, 1), pygame.K_s: (0, 1), pygame.K_LEFT: (-1, 0), pygame.K_a: (-1, 0), pygame.K_RIGHT: (1, 0), pygame.K_d: (1, 0)}
+                if key in directions and directions[key] != (-self.direction[0], -self.direction[1]):
+                    self.next_direction = directions[key]
+        elif self.state == "name":
+            if key == pygame.K_RETURN:
+                self.save_name()
+            elif key == pygame.K_ESCAPE:
+                self.show_menu()
+            elif key == pygame.K_BACKSPACE:
+                self.name_input = self.name_input[:-1]
+            elif event.unicode and event.unicode.isprintable() and len(self.name_input) < 30:
+                self.name_input += event.unicode
+        elif self.state == "notice" and key in (pygame.K_RETURN, pygame.K_ESCAPE, pygame.K_SPACE):
+            self.show_menu()
 
-def main() -> None:
-    root = tk.Tk()
-    SnakeApp(root)
-    root.mainloop()
+    def change_option(self) -> None:
+        if self.menu_index == 0:
+            sizes = {(20, 10): (30, 15), (30, 15): (40, 20), (40, 20): (20, 10)}
+            self.settings.width, self.settings.height = sizes[(self.settings.width, self.settings.height)]
+        elif self.menu_index == 1:
+            self.settings.fullscreen = not self.settings.fullscreen
+        elif self.menu_index == 2:
+            self.settings.music_enabled = not self.settings.music_enabled
+            if self.settings.music_enabled:
+                if self.state == "options":
+                    self.start_menu_music()
+            else:
+                self.stop_music()
+        elif self.menu_index == 3:
+            self.settings.sound_effects_enabled = not self.settings.sound_effects_enabled
+        save_settings(self.settings)
+        flags = pygame.FULLSCREEN if self.settings.fullscreen else 0
+        self.screen = pygame.display.set_mode(self.window_size(), flags)
+
+    def set_state(self, state: str) -> None:
+        self.state = state
+        self.menu_index = 0
+
+    def show_menu(self) -> None:
+        self.state = "menu"
+        self.menu_index = 0
+        self.start_menu_music()
+
+    def close(self) -> None:
+        self.running = False
+
+    def run(self) -> None:
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.close()
+                elif event.type == pygame.KEYDOWN:
+                    self.handle_key(event)
+            if self.state == "game" and self.game_started and pygame.time.get_ticks() - self.last_tick >= TICK_MS:
+                self.move()
+                self.last_tick = pygame.time.get_ticks()
+            if self.state == "menu":
+                self.draw_menu()
+            elif self.state == "records":
+                self.draw_records()
+            elif self.state == "options":
+                self.draw_options()
+            elif self.state == "game":
+                self.draw_game()
+            elif self.state == "name":
+                self.draw_name()
+            else:
+                self.draw_header("Novo recorde!")
+                self.draw_text(self.notice, (self.screen.get_width() // 2, 230), self.font, GOLD)
+                self.draw_text("ENTER continuar", (self.screen.get_width() // 2, self.screen.get_height() - 45), self.small_font, MUTED)
+            pygame.display.flip()
+            self.clock.tick(60)
+        self.stop_menu_music()
+        pygame.quit()
 
 
 if __name__ == "__main__":
-    main()
+    SnakeGame().run()
