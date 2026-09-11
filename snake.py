@@ -46,6 +46,8 @@ class Settings:
     height: int = DEFAULT_HEIGHT
     fullscreen: bool = False
     theme: str = "Clássico"
+    music_enabled: bool = True
+    sound_effects_enabled: bool = True
 
 
 def load_records() -> list[Record]:
@@ -75,8 +77,15 @@ def load_settings() -> Settings:
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         settings = Settings(int(data.get("width", DEFAULT_WIDTH)), int(data.get("height", DEFAULT_HEIGHT)), bool(data.get("fullscreen", False)), str(data.get("theme", "Clássico")))
+        settings.music_enabled = bool(data.get("music_enabled", True))
+        settings.sound_effects_enabled = bool(data.get("sound_effects_enabled", True))
         if (settings.width, settings.height) not in {(20, 10), (30, 15), (40, 20)}:
-            return Settings(fullscreen=settings.fullscreen, theme=settings.theme)
+            return Settings(
+                fullscreen=settings.fullscreen,
+                theme=settings.theme,
+                music_enabled=settings.music_enabled,
+                sound_effects_enabled=settings.sound_effects_enabled,
+            )
         return settings
     except (FileNotFoundError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
         return Settings()
@@ -122,7 +131,7 @@ class SnakeGame:
         return (self.settings.width * CELL_SIZE + 40, self.settings.height * CELL_SIZE + 150)
 
     def start_menu_music(self) -> None:
-        if MENU_MUSIC_FILE.exists() and not self.music_playing:
+        if self.settings.music_enabled and MENU_MUSIC_FILE.exists() and not self.music_playing:
             try:
                 if not pygame.mixer.get_init():
                     return
@@ -138,11 +147,11 @@ class SnakeGame:
             self.music_playing = False
 
     def play_selection_sound(self) -> None:
-        if self.select_sound is not None:
+        if self.settings.sound_effects_enabled and self.select_sound is not None:
             self.select_sound.play()
 
     def start_game_music(self) -> None:
-        if pygame.mixer.get_init() and GAME_MUSIC_FILE.exists():
+        if self.settings.music_enabled and pygame.mixer.get_init() and GAME_MUSIC_FILE.exists():
             try:
                 pygame.mixer.music.load(str(GAME_MUSIC_FILE))
                 pygame.mixer.music.play(-1)
@@ -203,7 +212,14 @@ class SnakeGame:
 
     def draw_options(self) -> None:
         self.draw_header("Opções")
-        values = (f"Resolução: {self.settings.width}x{self.settings.height}", f"Tela cheia: {'Ligada' if self.settings.fullscreen else 'Desligada'}", "Tema: Clássico (futuro)")
+        checkbox = lambda enabled: "[x]" if enabled else "[ ]"
+        values = (
+            f"Resolução: {self.settings.width}x{self.settings.height}",
+            f"Tela cheia: {checkbox(self.settings.fullscreen)}",
+            f"Música: {checkbox(self.settings.music_enabled)}",
+            f"Efeitos sonoros: {checkbox(self.settings.sound_effects_enabled)}",
+            "Tema: Clássico (futuro)",
+        )
         for index, value in enumerate(values):
             color = GOLD if index == self.menu_index else TEXT
             self.draw_text(value, (self.screen.get_width() // 2, 180 + index * 48), self.font, color)
@@ -297,10 +313,10 @@ class SnakeGame:
                 self.close()
         elif self.state in ("records", "options"):
             if self.state == "options" and key in (pygame.K_UP, pygame.K_w):
-                self.menu_index = (self.menu_index - 1) % 3
+                self.menu_index = (self.menu_index - 1) % 5
                 self.play_selection_sound()
             elif self.state == "options" and key in (pygame.K_DOWN, pygame.K_s):
-                self.menu_index = (self.menu_index + 1) % 3
+                self.menu_index = (self.menu_index + 1) % 5
                 self.play_selection_sound()
             elif key in (pygame.K_ESCAPE, pygame.K_RETURN) and self.state == "records":
                 self.show_menu()
@@ -335,6 +351,15 @@ class SnakeGame:
             self.settings.width, self.settings.height = sizes[(self.settings.width, self.settings.height)]
         elif self.menu_index == 1:
             self.settings.fullscreen = not self.settings.fullscreen
+        elif self.menu_index == 2:
+            self.settings.music_enabled = not self.settings.music_enabled
+            if self.settings.music_enabled:
+                if self.state == "options":
+                    self.start_menu_music()
+            else:
+                self.stop_music()
+        elif self.menu_index == 3:
+            self.settings.sound_effects_enabled = not self.settings.sound_effects_enabled
         save_settings(self.settings)
         flags = pygame.FULLSCREEN if self.settings.fullscreen else 0
         self.screen = pygame.display.set_mode(self.window_size(), flags)

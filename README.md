@@ -25,7 +25,9 @@ reproduzido ao navegar ou selecionar uma opção. Todos os áudios usam o mixer
 do Pygame.
 
 Todos os resultados são salvos em `highscore.json`, em ordem dos mais recentes,
-e as preferências (resolução e tela cheia) em `settings.json`. A tela de
+e as preferências (resolução, tela cheia, música e efeitos sonoros) em
+`settings.json`. O menu **Opções** possui checkboxes independentes para
+desligar a música e os efeitos sonoros. A tela de
 Records ordena as partidas da maior pontuação para a menor e preserva o nome
 completo de cada jogador.
 
