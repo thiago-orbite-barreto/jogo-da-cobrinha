@@ -215,18 +215,33 @@ class SnakeGame:
 
     def draw_options(self) -> None:
         self.draw_header("Opções")
-        checkbox = lambda enabled: "[x]" if enabled else "[ ]"
         values = (
-            f"Resolução: {self.settings.width}x{self.settings.height}",
-            f"Tela cheia: {checkbox(self.settings.fullscreen)}",
-            f"Música: {checkbox(self.settings.music_enabled)}",
-            f"Efeitos sonoros: {checkbox(self.settings.sound_effects_enabled)}",
+            (f"Resolução: {self.settings.width}x{self.settings.height}", None),
+            ("Tela cheia", self.settings.fullscreen),
+            ("Música", self.settings.music_enabled),
+            ("Efeitos sonoros", self.settings.sound_effects_enabled),
             "Tema: Clássico (futuro)",
         )
         for index, value in enumerate(values):
             color = GOLD if index == self.menu_index else TEXT
-            self.draw_text(value, (self.screen.get_width() // 2, 180 + index * 48), self.font, color)
+            y = 180 + index * 48
+            if isinstance(value, tuple):
+                label, enabled = value
+                self.draw_text(label, (self.screen.get_width() // 2, y), self.font, color)
+                if enabled is not None:
+                    self.draw_checkbox((self.screen.get_width() // 2 - 170, y), enabled, index == self.menu_index)
+            else:
+                self.draw_text(value, (self.screen.get_width() // 2, y), self.font, color)
         self.draw_text("ENTER altera     ESC volta", (self.screen.get_width() // 2, self.screen.get_height() - 35), self.small_font, MUTED)
+
+    def draw_checkbox(self, position: tuple[int, int], checked: bool, selected: bool) -> None:
+        """Desenha checkbox vetorial sem depender de caracteres de fonte."""
+
+        x, y = position
+        border = GOLD if selected else MUTED
+        pygame.draw.rect(self.screen, border, (x - 12, y - 12, 24, 24), width=2, border_radius=3)
+        if checked:
+            pygame.draw.rect(self.screen, GOLD if selected else BLUE, (x - 7, y - 7, 14, 14), border_radius=2)
 
     def new_game(self) -> None:
         self.stop_menu_music()
