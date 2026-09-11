@@ -25,6 +25,9 @@ Point = tuple[int, int]
 
 NAVY = (9, 13, 28)
 PANEL = (18, 29, 49)
+PLAYFIELD = (16, 32, 24)
+PLAYFIELD_BORDER = (105, 183, 232)
+PLAYFIELD_GRID = (27, 55, 39)
 BLUE = (105, 183, 232)
 TEXT = (214, 225, 232)
 MUTED = (127, 154, 176)
@@ -242,8 +245,21 @@ class SnakeGame:
         return random.choice(free) if free else None
 
     def draw_game(self) -> None:
-        self.screen.fill((16, 32, 24))
-        offset_x, offset_y = 20, 55
+        self.screen.fill(NAVY)
+        field_width = self.settings.width * CELL_SIZE
+        field_height = self.settings.height * CELL_SIZE
+        offset_x, offset_y = 20, 62
+        field_rect = pygame.Rect(offset_x, offset_y, field_width, field_height)
+        pygame.draw.rect(self.screen, PANEL, (0, 0, self.screen.get_width(), 48))
+        pygame.draw.rect(self.screen, PANEL, (0, offset_y + field_height + 8, self.screen.get_width(), self.screen.get_height() - offset_y - field_height - 8))
+        pygame.draw.rect(self.screen, PLAYFIELD, field_rect)
+        for x in range(1, self.settings.width):
+            grid_x = offset_x + x * CELL_SIZE
+            pygame.draw.line(self.screen, PLAYFIELD_GRID, (grid_x, offset_y), (grid_x, offset_y + field_height))
+        for y in range(1, self.settings.height):
+            grid_y = offset_y + y * CELL_SIZE
+            pygame.draw.line(self.screen, PLAYFIELD_GRID, (offset_x, grid_y), (offset_x + field_width, grid_y))
+        pygame.draw.rect(self.screen, PLAYFIELD_BORDER, field_rect, width=3)
         for x, y in self.snake:
             color = (126, 231, 135) if (x, y) == self.snake[0] else GREEN
             pygame.draw.rect(self.screen, color, (offset_x + x * CELL_SIZE, offset_y + y * CELL_SIZE, CELL_SIZE - 2, CELL_SIZE - 2))
